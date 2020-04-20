@@ -13,7 +13,7 @@ end
 local function parse_chunk_size(chunk_size)
 	local default = 1024 * 128 -- default to 128K (the default for squashfs)
 
-	if chunk_size == nil then return default end 
+	if chunk_size == nil then return default end
 
 	local result
 	local multiplier = 1
@@ -37,7 +37,7 @@ local function parse_chunk_size(chunk_size)
 		print(string.format('Unable to parse "%s", using default of 1M', chunk_size))
 		return default
 	end
-	
+
 	return result * multiplier
 end
 
@@ -218,7 +218,7 @@ local xxhash = (function()
 		typedef unsigned int XXH32_hash_t;
 
 		typedef enum { XXH_OK = 0, XXH_ERROR } XXH_errorcode;
-	
+
 		typedef struct XXH32_state_s XXH32_state_t;
 
 		XXH32_hash_t XXH32(const void* input, size_t length, unsigned int seed);
@@ -239,7 +239,7 @@ local function clone(input_url, output_file_path, seed_file_path)
 	local function create_downloader(input_url, max_chunk_size)
 		local data = ffi.new('char[?]', max_chunk_size)
 		local data_offset = 0
-	
+
 		local write_function = ffi.cast('size_t (*)(char *, size_t, size_t, void *)', function(ptr, size, nmemb, userdata)
 			ffi.copy(data + data_offset, ptr, nmemb)
 			data_offset = data_offset + nmemb
@@ -249,7 +249,7 @@ local function clone(input_url, output_file_path, seed_file_path)
 		local c = curl.curl_easy_init()
 		curl.curl_easy_setopt(c, curl.CURLOPT_URL, input_url)
 		curl.curl_easy_setopt(c, curl.CURLOPT_WRITEFUNCTION, write_function)
-		
+
 		return {
 			download = function(chunk_start, chunk_size, chunk_hash)
 				data_offset = 0
@@ -278,15 +278,15 @@ local function clone(input_url, output_file_path, seed_file_path)
 			end
 		}
 	end
-	
+
 	local function download_manifest(input_url)
 		local json_parts = {}
-	
+
 		local write_function = ffi.cast('size_t (*)(char *, size_t, size_t, void *)', function(ptr, size, nmemb, userdata)
 			table.insert(json_parts, ffi.string(ptr, nmemb))
 			return nmemb
 		end)
-	
+
 		local c = curl.curl_easy_init()
 		curl.curl_easy_setopt(c, curl.CURLOPT_URL, input_url .. '.json')
 		curl.curl_easy_setopt(c, curl.CURLOPT_WRITEFUNCTION, write_function)
@@ -295,9 +295,9 @@ local function clone(input_url, output_file_path, seed_file_path)
 			print(ffi.string(curl.curl_easy_strerror(result)))
 		end
 		curl.curl_easy_cleanup(c)
-	
+
 		write_function:free()
-	
+
 		return table.concat(json_parts, '')
 	end
 
@@ -392,7 +392,7 @@ local function clone(input_url, output_file_path, seed_file_path)
 
 		local data = seed_file:read(size)
 		local data_size = data and #data or 0
-		
+
 		if data_size == size and xxhash.XXH32(data, data_size, 0) == hash then
 			output_file:write(data)
 			log('{"event":"cp_chunk","index":', chunk_index, '}')
@@ -459,7 +459,7 @@ local function diff(file_path_new, file_path_old, chunk_size)
 	while true do
 		local data_new = file_new:read(chunk_size)
 		local data_old = file_old:read(chunk_size)
-		
+
 		if not data_new or not data_old then
 			break
 		end
@@ -550,19 +550,19 @@ end
 
 if arg[1] == 'clone' then
 	if #arg < 4 then
-		print('usage: moonchunker clone <input_url> <output_file_path> <seed_file_path>')
+		print('usage: moonsinter clone <input_url> <output_file_path> <seed_file_path>')
 		os.exit(1)
 	end
 	clone(arg[2], arg[3], arg[4])
 elseif arg[1] == 'diff' then
 	if #arg < 3 then
-		print('usage: moonchunker diff <file_path_new> <file_path_old> [chunk_size]')
+		print('usage: moonsinter diff <file_path_new> <file_path_old> [chunk_size]')
 		os.exit(1)
 	end
 	diff(arg[2], arg[3], arg[4])
 elseif arg[1] == 'generate' then
 	if #arg < 2 then
-		print('usage: moonchunker generate <file_path> [chunk_size]')
+		print('usage: moonsinter generate <file_path> [chunk_size]')
 		os.exit(1)
 	end
 	generate(arg[2], arg[3])
@@ -570,3 +570,4 @@ else
 	print('Commands are "clone", "diff" and "generate"')
 	os.exit(1)
 end
+

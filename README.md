@@ -49,7 +49,6 @@ You can also specify where `libcurl` and `libxxhash` are using the `MOONSINTER_L
 
 - [ ] While cloning, check output file for current chunk instead of overwriting it with the same data. This will prevent unnecessary wear on the storage device.
 
-
 ## Inspiration
 
 - [bita](https://github.com/oll3/bita) - distributing updates via HTTP(S), generating an intermediate file, and directly updating block devices was greatly inspired by this. How the two accomplish this are vastly different though.
