@@ -1,45 +1,4 @@
-#!/usr/bin/env luajit
-
 local ffi = require('ffi')
-
-local function log(...)
-	for _, arg in ipairs({...}) do
-		io.write(tostring(arg))
-	end
-	io.write('\n')
-	io.flush()
-end
-
-local function parse_chunk_size(chunk_size)
-	local default = 1024 * 128 -- default to 128K (the default for squashfs)
-
-	if chunk_size == nil then return default end
-
-	local result
-	local multiplier = 1
-	local chunk_size_lower = chunk_size:lower()
-
-	local unit = chunk_size_lower:sub(-1)
-	if unit == 'k' then
-		result = tonumber(chunk_size_lower:sub(0, -2))
-		multiplier = 1024
-	elseif unit == 'm' then
-		result = tonumber(chunk_size_lower:sub(0, -2))
-		multiplier = 1024 * 1024
-	elseif unit == 'g' then
-		result = tonumber(chunk_size_lower:sub(0, -2))
-		multiplier = 1024 * 1024 * 1024
-	else
-		result = tonumber(chunk_size_lower)
-	end
-
-	if result == nil then
-		print(string.format('Unable to parse "%s", using default of 1M', chunk_size))
-		return default
-	end
-
-	return result * multiplier
-end
 
 local function safe_ffi_load(name)
 	local lib
@@ -235,7 +194,60 @@ local xxhash = (function()
 	return safe_ffi_load('xxhash') or ffi.load('./libxxhash.so')
 end)()
 
-local function clone(input_url, output_file_path, seed_file_path)
+local lib = {}
+
+local function exit()
+	if not MOONSINTER_EXPORT_LIB then os.exit(1) end
+end
+
+local function log(...)
+	for _, arg in ipairs({...}) do
+		io.write(tostring(arg))
+	end
+	io.write('\n')
+	io.flush()
+end
+
+local function log_json(tbl)
+	log(json.encode(tbl))
+end
+
+local function parse_chunk_size(chunk_size)
+	local default = 1024 * 128 -- default to 128K (the default for squashfs)
+
+	if chunk_size == nil then return default end
+
+	local result
+	local multiplier = 1
+	local chunk_size_lower = chunk_size:lower()
+
+	local unit = chunk_size_lower:sub(-1)
+	if unit == 'k' then
+		result = tonumber(chunk_size_lower:sub(0, -2))
+		multiplier = 1024
+	elseif unit == 'm' then
+		result = tonumber(chunk_size_lower:sub(0, -2))
+		multiplier = 1024 * 1024
+	elseif unit == 'g' then
+		result = tonumber(chunk_size_lower:sub(0, -2))
+		multiplier = 1024 * 1024 * 1024
+	else
+		result = tonumber(chunk_size_lower)
+	end
+
+	if result == nil then
+		if not MOONSINTER_EXPORT_LIB then
+			log(string.format('Unable to parse "%s", using default of 1M', chunk_size))
+		end
+		return default
+	end
+
+	return result * multiplier
+end
+
+function lib.clone(input_url, output_file_path, seed_file_path, event_callback)
+	local emit = event_callback or log_json
+
 	local function create_downloader(input_url, max_chunk_size)
 		local data = ffi.new('char[?]', max_chunk_size)
 		local data_offset = 0
@@ -250,6 +262,12 @@ local function clone(input_url, output_file_path, seed_file_path)
 		curl.curl_easy_setopt(c, curl.CURLOPT_URL, input_url)
 		curl.curl_easy_setopt(c, curl.CURLOPT_WRITEFUNCTION, write_function)
 
+		local function cleanup()
+			curl.curl_easy_cleanup(c)
+			-- this is important as LuaJIT can create only a limited amount of c callbacks
+			write_function:free()
+		end
+
 		return {
 			download = function(chunk_start, chunk_size, chunk_hash)
 				data_offset = 0
@@ -261,21 +279,19 @@ local function clone(input_url, output_file_path, seed_file_path)
 				local result = curl.curl_easy_perform(c)
 
 				if result ~= curl.CURLE_OK then
+					cleanup()
 					return nil, ffi.string(curl.curl_easy_strerror(result))
 				end
 
 				local hash = xxhash.XXH32(data, chunk_size, 0)
 				if hash ~= chunk_hash then
+					cleanup()
 					return nil, 'Hashes don\'t match'
 				end
 
 				return data
 			end,
-			done = function()
-				curl.curl_easy_cleanup(c)
-				-- this is important as LuaJIT can create only a limited amount of c callbacks
-				write_function:free()
-			end
+			done = cleanup,
 		}
 	end
 
@@ -291,12 +307,13 @@ local function clone(input_url, output_file_path, seed_file_path)
 		curl.curl_easy_setopt(c, curl.CURLOPT_URL, input_url .. '.json')
 		curl.curl_easy_setopt(c, curl.CURLOPT_WRITEFUNCTION, write_function)
 		local result = curl.curl_easy_perform(c)
-		if result ~= curl.CURLE_OK then
-			print(ffi.string(curl.curl_easy_strerror(result)))
-		end
-		curl.curl_easy_cleanup(c)
 
+		curl.curl_easy_cleanup(c)
 		write_function:free()
+
+		if result ~= curl.CURLE_OK then
+			return nil, ffi.string(curl.curl_easy_strerror(result))
+		end
 
 		return table.concat(json_parts, '')
 	end
@@ -353,26 +370,31 @@ local function clone(input_url, output_file_path, seed_file_path)
 		return results
 	end
 
-	local manifest_str = download_manifest(input_url)
+	local manifest_str, err = download_manifest(input_url)
+	if err then
+		emit { event = 'dl_manifest_failed', value = err }
+		return exit()
+	end
+
 	local manifest = json.decode(manifest_str)
 	local chunk_size = manifest['chunk_size']
 	local last_chunk_size = manifest['last_chunk_size']
 
 	local chunk_hashes = parse_chunk_hashes_string(manifest['chunk_hashes'])
 	local total_chunks = #chunk_hashes
-	log('{"event":"total_chunks","value":', total_chunks, '}')
+	emit { event = 'total_chunks', value = total_chunks }
 
-	log('{"event":"seed_file_hash_start"}')
+	emit { event = 'seed_file_hash_start' }
 	local seed_file_hash, ok = hash_file(seed_file_path, manifest['file_size'], chunk_size)
 	if not ok then
-		log('{"event":"seed_file_hash_error", "value": "Failed to hash seed file"}')
-		os.exit(1)
+		emit { event = 'seed_file_hash_error', value = 'Failed to hash seed file' }
+		return exit()
 	end
-	log('{"event":"seed_file_hash_end"}')
+	emit { event = 'seed_file_hash_end' }
 
 	if seed_file_hash == manifest['file_hash'] then
-		log('{"event":"seed_file_hash_match"}')
-		os.exit(1)
+		emit { event = 'seed_file_hash_match' }
+		return exit()
 	end
 
 	local seed_file = assert(io.open(seed_file_path, 'rb'))
@@ -395,19 +417,19 @@ local function clone(input_url, output_file_path, seed_file_path)
 
 		if data_size == size and xxhash.XXH32(data, data_size, 0) == hash then
 			output_file:write(data)
-			log('{"event":"cp_chunk","index":', chunk_index, '}')
+			emit { event = 'cp_chunk', value = chunk_index }
 		else
 			local data, err = downloader.download(output_file:seek(), size, hash)
 
 			if err then
-				log(string.format('{"event":"dl_chunk_failed","value":"Failed to download chunk %i: %s"}', chunk_index, err))
-				os.exit(1)
-			else
-				total_chunks_downloaded = total_chunks_downloaded + 1
-				total_bytes_downloaded = total_bytes_downloaded + size
-				output_file:write(ffi.string(data, size))
-				log(string.format('{"event":"dl_chunk","index":%i,"value":%i}', chunk_index, size))
+				emit { event = 'dl_chunk_failed', index = chunk_index, value = err }
+				return exit()
 			end
+
+			total_chunks_downloaded = total_chunks_downloaded + 1
+			total_bytes_downloaded = total_bytes_downloaded + size
+			output_file:write(ffi.string(data, size))
+			emit { event = 'dl_chunk', value = chunk_index, size = size }
 		end
 	end
 
@@ -416,36 +438,38 @@ local function clone(input_url, output_file_path, seed_file_path)
 	seed_file:close()
 	output_file:close()
 
-	log('{"event":"output_file_hash_start"}')
+	emit { event = 'output_file_hash_start' }
 	local output_file_hash, ok = hash_file(output_file_path, manifest['file_size'], chunk_size)
 	if not ok then
-		log('{"event":"output_file_hash_error", "value": "Failed to hash output file"}')
-		os.exit(1)
+		emit { event = 'output_file_hash_error', value = 'Failed to hash output file' }
+		return exit()
 	end
 
 	if output_file_hash ~= manifest['file_hash'] then
-		log(string.format('{"event":"output_file_hash_bad","value":"Expected %i but got %i"}', manifest['file_hash'], output_file_hash))
-		os.exit(1)
+		emit { event = 'output_file_hash_bad', value = string.format('Expected %i but got %i', manifest['file_hash'], output_file_hash) }
+		return exit()
 	end
-	log('{"event":"output_file_hash_end"}')
+	emit { event = 'output_file_hash_end' }
 
-	if total_chunks_downloaded > 0 then
-		log('{"event":"total_chunks_downloaded","value":', total_chunks_downloaded, '}')
-		log('{"event":"total_bytes_downloaded","value":', total_bytes_downloaded, '}')
-	end
+	emit {
+		event = 'done',
+		total_bytes_downloaded = total_bytes_downloaded,
+		total_chunks_downloaded = total_chunks_downloaded,
+	}
 end
 
-local function diff(file_path_new, file_path_old, chunk_size)
+function lib.diff(file_path_new, file_path_old, chunk_size, event_callback)
+	local emit = event_callback or log_json
 	chunk_size = parse_chunk_size(chunk_size)
 
 	if C.access(file_path_new, C.R_OK) == -1 then
-		log(string.format('Unable to read file "%s"', file_path_new))
-		os.exit(1)
+		emit { event = 'unable_to_access_file', value = file_path_new }
+		return exit()
 	end
 
 	if C.access(file_path_old, C.R_OK) == -1 then
-		log(string.format('Unable to read file "%s"', file_path_old))
-		os.exit(1)
+		emit { event = 'unable_to_access_file', value = file_path_old }
+		return exit()
 	end
 
 	local file_new = assert(io.open(file_path_new, 'rb'))
@@ -476,20 +500,20 @@ local function diff(file_path_new, file_path_old, chunk_size)
 		end
 	end
 
-	-- log('total = ', total, ', same = ', same, ', diff = ', diff)
-	log((diff / total) * 100, '% of the data is different')
-
 	file_old:close()
 	file_new:close()
+
+	emit { event = 'done', percentage_different = (diff / total) * 100 }
 end
 
-local function generate(file_path, chunk_size)
+function lib.generate(file_path, chunk_size, event_callback)
+	local emit = event_callback or log_json
 	chunk_size = parse_chunk_size(chunk_size)
 	file_path = file_path or ''
 
 	if C.access(file_path, C.R_OK) == -1 then
-		log(string.format('Unable to read file "%s"', file_path))
-		os.exit(1)
+		emit { event = 'unable_to_access_file', value = file_path }
+		return exit()
 	end
 
 	local input_file = assert(io.open(file_path, 'rb'))
@@ -519,8 +543,8 @@ local function generate(file_path, chunk_size)
 		end
 
 		if xxhash.XXH32_update(state, data, data_size) ~= xxhash.XXH_OK then
-			log('XXH32 state update failed')
-			os.exit(1)
+			emit { event = 'hash_update_failed' }
+			return exit()
 		end
 
 		output_file:write(string.format('%x', xxhash.XXH32(data, data_size, 0)))
@@ -537,37 +561,43 @@ local function generate(file_path, chunk_size)
 	output_file:write('"file_size":' .. file_size)
 	xxhash.XXH32_freeState(state)
 
-	log('Chunk count: ', chunk_count)
-	log('Chunk size:  ', chunk_size)
-	log('File hash:   ', file_hash)
-	log('File size:   ', file_size)
-
 	output_file:write('}')
 	output_file:close()
-
 	input_file:close()
+
+	emit {
+		event = 'done',
+		chunk_count = chunk_count,
+		chunk_size = chunk_size,
+		file_hash = file_hash,
+		file_size = file_size,
+	}
 end
+
+if MOONSINTER_EXPORT_LIB then return lib end
 
 if arg[1] == 'clone' then
 	if #arg < 4 then
-		print('usage: moonsinter clone <input_url> <output_file_path> <seed_file_path>')
+		log('usage: luajit moonsinter clone <input_url> <output_file_path> <seed_file_path>')
 		os.exit(1)
 	end
-	clone(arg[2], arg[3], arg[4])
+	lib.clone(arg[2], arg[3], arg[4])
 elseif arg[1] == 'diff' then
 	if #arg < 3 then
-		print('usage: moonsinter diff <file_path_new> <file_path_old> [chunk_size]')
+		log('usage: luajit moonsinter diff <file_path_new> <file_path_old> [chunk_size]')
 		os.exit(1)
 	end
-	diff(arg[2], arg[3], arg[4])
+	lib.diff(arg[2], arg[3], arg[4])
 elseif arg[1] == 'generate' then
 	if #arg < 2 then
-		print('usage: moonsinter generate <file_path> [chunk_size]')
+		log('usage: luajit moonsinter generate <file_path> [chunk_size]')
 		os.exit(1)
 	end
-	generate(arg[2], arg[3])
+	lib.generate(arg[2], arg[3])
 else
-	print('Commands are "clone", "diff" and "generate"')
-	os.exit(1)
+	log('Usage:')
+	log('  luajit moonsinter clone <input_url> <output_file_path> <seed_file_path>')
+	log('  luajit moonsinter diff <file_path_new> <file_path_old> [chunk_size]')
+	log('  luajit moonsinter generate <file_path> [chunk_size]')
 end
 
