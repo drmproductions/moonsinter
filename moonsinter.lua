@@ -482,26 +482,25 @@ if MOONSINTER_EXPORT_LIB then return lib end
 
 if arg[1] == 'clone' then
 	if #arg < 4 then
-		log('usage: luajit moonsinter clone <input_url> <output_file_path> <seed_file_path>')
+		log('usage: luajit moonsinter.lua clone <input_url> <output_file_path> <seed_file_path>')
 		os.exit(1)
 	end
 	lib.clone(arg[2], arg[3], arg[4])
 elseif arg[1] == 'diff' then
 	if #arg < 3 then
-		log('usage: luajit moonsinter diff <file_path_new> <file_path_old> [chunk_size]')
+		log('usage: luajit moonsinter.lua diff <file_path_new> <file_path_old> [chunk_size]')
 		os.exit(1)
 	end
 	lib.diff(arg[2], arg[3], arg[4])
 elseif arg[1] == 'generate' then
 	if #arg < 2 then
-		log('usage: luajit moonsinter generate <file_path> [chunk_size]')
+		log('usage: luajit moonsinter.lua generate <file_path> [chunk_size]')
 		os.exit(1)
 	end
 	lib.generate(arg[2], arg[3])
 else
 	log('Usage:')
-	log('  luajit moonsinter clone <input_url> <output_file_path> <seed_file_path>')
-	log('  luajit moonsinter diff <file_path_new> <file_path_old> [chunk_size]')
-	log('  luajit moonsinter generate <file_path> [chunk_size]')
+	log('  luajit moonsinter.lua clone <input_url> <output_file_path> <seed_file_path>')
+	log('  luajit moonsinter.lua diff <file_path_new> <file_path_old> [chunk_size]')
+	log('  luajit moonsinter.lua generate <file_path> [chunk_size]')
 end
-
