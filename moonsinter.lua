@@ -287,13 +287,15 @@ function lib.clone(input_url, output_file_path, seed_file_path, event_callback)
 	local total_chunks = #chunk_hashes
 	emit { event = 'total_chunks', value = total_chunks }
 
+	-- check to see if the seed file already matches the remote hash
+
 	emit { event = 'seed_file_hash_start' }
 	local seed_file_hash, ok = hash_file(seed_file_path, manifest['file_size'], chunk_size)
 	if not ok then
 		emit { event = 'seed_file_hash_error', value = 'Failed to hash seed file' }
 		return exit()
 	end
-	emit { event = 'seed_file_hash_end' }
+	emit { event = 'seed_file_hash_end', local_hash = seed_file_hash, remote_hash = manifest['file_hash'] }
 
 	if seed_file_hash == manifest['file_hash'] then
 		emit { event = 'seed_file_hash_match' }
