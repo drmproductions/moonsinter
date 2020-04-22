@@ -269,11 +269,15 @@ function lib.clone(input_url, output_file_path, seed_file_path, event_callback)
 		return results
 	end
 
+	-- download the manifest
+
+	emit { event = 'dl_manifest_start' }
 	local manifest_str, err = download_manifest(input_url)
 	if err then
 		emit { event = 'dl_manifest_failed', value = err }
 		return exit()
 	end
+	emit { event = 'dl_manifest_end' }
 
 	local manifest = json.decode(manifest_str)
 	local chunk_size = manifest['chunk_size']
