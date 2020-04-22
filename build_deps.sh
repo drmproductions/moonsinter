@@ -41,4 +41,5 @@ cd ..
 rm -rf xxHash-$XXHASH_VERSION
 
 echo 'Use the following to run:'
-echo 'PATH=$PATH:. ./moonchunker ...'
+echo './luajit moonsinter.lua'
+
