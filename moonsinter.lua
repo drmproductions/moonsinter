@@ -427,7 +427,7 @@ function lib.diff(file_path_new, file_path_old, chunk_size, event_callback)
 	file_old:close()
 	file_new:close()
 
-	emit { event = 'done', percentage_different = (diff / total) * 100 }
+	emit { event = 'done', total = total, diff = diff, same = same, percentage_different = (diff / total) * 100 }
 end
 
 function lib.generate(file_path, chunk_size, event_callback)
