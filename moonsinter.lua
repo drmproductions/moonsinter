@@ -302,6 +302,23 @@ function lib.clone(input_url, output_file_path, seed_file_path, event_callback)
 		return exit()
 	end
 
+	-- check to see if the output file already matches the remote hash
+
+	emit { event = 'output_file_hash_start' }
+	local output_file_hash, ok = hash_file(output_file_path, manifest['file_size'], chunk_size)
+	if not ok then
+		emit { event = 'output_file_hash_error', value = 'Failed to hash output file' }
+		return exit()
+	end
+	emit { event = 'output_file_hash_end', local_hash = output_file_hash, remote_hash = manifest['file_hash'] }
+
+	if output_file_hash == manifest['file_hash'] then
+		emit { event = 'output_file_hash_match' }
+		return exit()
+	end
+
+	-- open the files
+
 	local seed_file = assert(io.open(seed_file_path, 'rb'))
 	seed_file:setvbuf('no')
 
