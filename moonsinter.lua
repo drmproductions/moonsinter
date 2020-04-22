@@ -139,12 +139,7 @@ local function parse_chunk_size(chunk_size)
 		result = tonumber(chunk_size_lower)
 	end
 
-	if result == nil then
-		if not MOONSINTER_EXPORT_LIB then
-			log(string.format('Unable to parse "%s", using default of 1M', chunk_size))
-		end
-		return default
-	end
+	if result == nil then return default end
 
 	return result * multiplier
 end
@@ -364,7 +359,6 @@ end
 
 function lib.diff(file_path_new, file_path_old, chunk_size, event_callback)
 	local emit = event_callback or log_json
-	chunk_size = parse_chunk_size(chunk_size)
 
 	if C.access(file_path_new, C.R_OK) == -1 then
 		emit { event = 'unable_to_access_file', value = file_path_new }
@@ -375,6 +369,9 @@ function lib.diff(file_path_new, file_path_old, chunk_size, event_callback)
 		emit { event = 'unable_to_access_file', value = file_path_old }
 		return exit()
 	end
+
+	chunk_size = parse_chunk_size(chunk_size)
+	emit { event = 'chunk_size', value = chunk_size }
 
 	local file_new = assert(io.open(file_path_new, 'rb'))
 	file_new:setvbuf('no')
@@ -412,13 +409,15 @@ end
 
 function lib.generate(file_path, chunk_size, event_callback)
 	local emit = event_callback or log_json
-	chunk_size = parse_chunk_size(chunk_size)
 	file_path = file_path or ''
 
 	if C.access(file_path, C.R_OK) == -1 then
 		emit { event = 'unable_to_access_file', value = file_path }
 		return exit()
 	end
+
+	chunk_size = parse_chunk_size(chunk_size)
+	emit { event = 'chunk_size', value = chunk_size }
 
 	local input_file = assert(io.open(file_path, 'rb'))
 	input_file:setvbuf('no')
