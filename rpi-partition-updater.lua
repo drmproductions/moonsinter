@@ -127,6 +127,8 @@ while true do ::continue::
 			update_boot_cmdline(seed_partition, output_partition)
 		elseif e == 'cp_chunk' then
 			log('Copied chunk: ', tbl.value, '/', total_chunks)
+		elseif e == 'skip_chunk' then
+			log('Skipped chunk: ', tbl.value, '/', total_chunks)
 		elseif e == 'dl_chunk_failed' then
 			log('Error while downloading chunk ', tbl.index, ': ', tbl.value)
 		elseif e == 'dl_chunk' then

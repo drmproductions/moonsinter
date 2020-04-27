@@ -322,7 +322,7 @@ function lib.clone(input_url, output_file_path, seed_file_path, event_callback)
 	local seed_file = assert(io.open(seed_file_path, 'rb'))
 	seed_file:setvbuf('no')
 
-	local output_file = assert(io.open(output_file_path, 'wb'))
+	local output_file = assert(io.open(output_file_path, 'r+b'))
 	output_file:setvbuf('no')
 
 	-- allocate memory that can fit the max chunk size (the last chunk while probably be smaller than this)
@@ -338,8 +338,17 @@ function lib.clone(input_url, output_file_path, seed_file_path, event_callback)
 		local data_size = data and #data or 0
 
 		if data_size == size and xxhash.XXH32(data, data_size, 0) == hash then
-			output_file:write(data)
-			emit { event = 'cp_chunk', value = chunk_index }
+			local output_previous_seek = output_file:seek()
+			local output_data = output_file:read(data_size)
+			local output_data_size = output_data and #output_data or 0
+
+			if output_data_size == data_size and xxhash.XXH32(output_data, output_data_size, 0) == hash then
+				emit { event = 'skip_chunk', value = chunk_index }
+			else
+				output_file:seek('set', output_previous_seek)
+				output_file:write(data)
+				emit { event = 'cp_chunk', value = chunk_index }
+			end
 		else
 			local data, err = downloader.download(output_file:seek(), size, hash)
 
