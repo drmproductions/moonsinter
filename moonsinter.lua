@@ -509,6 +509,29 @@ function lib.generate(file_path, chunk_size, event_callback)
 	}
 end
 
+function lib.http_get(url)
+	local chunks = {}
+
+	local write_function = ffi.cast('size_t (*)(char *, size_t, size_t, void *)', function(ptr, size, nmemb, userdata)
+		table.insert(chunks, ffi.string(ptr, nmemb))
+		return nmemb
+	end)
+
+	local c = curl.curl_easy_init()
+	curl.curl_easy_setopt(c, curl.CURLOPT_URL, url)
+	curl.curl_easy_setopt(c, curl.CURLOPT_WRITEFUNCTION, write_function)
+	local result = curl.curl_easy_perform(c)
+
+	curl.curl_easy_cleanup(c)
+	write_function:free()
+
+	if result ~= curl.CURLE_OK then
+		return nil, ffi.string(curl.curl_easy_strerror(result))
+	end
+
+	return table.concat(chunks, '')
+end
+
 if MOONSINTER_EXPORT_LIB then return lib end
 
 if arg[1] == 'clone' then
